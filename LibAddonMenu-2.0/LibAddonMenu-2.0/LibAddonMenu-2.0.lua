@@ -173,80 +173,44 @@ end
 --INTERNAL FUNCTION
 --creates controls when options panel is first shown
 --controls anchoring of these controls in the panel
-local function CreateOptionsControls(panel)
-	local addonID = panel:GetName()
-	local optionsTable = addonToOptionsMap[addonID]
-
-	if optionsTable then
-		local isHalf, widget
-		local lastAddedControl, lacAtHalfRow, oIndex, widgetData, widgetType
-		local submenu, subWidgetData, sIndex, subWidgetType, subWidget
-		local anchorOffset = 0
-		local anchorOffsetSub
-		local lastAddedControlSub, lacAtHalfRowSub
-		for oIndex=1,#optionsTable do
-			widgetData = optionsTable[oIndex]
-			widgetType = widgetData.type
-			if widgetType == "submenu" then
-				submenu = LAMCreateControl[widgetType](panel, widgetData)
-				if lastAddedControl then
-					submenu:SetAnchor(TOPLEFT, lastAddedControl, BOTTOMLEFT, 0, 15 + anchorOffset)
-				else
-					submenu:SetAnchor(TOPLEFT)
-				end
-				lastAddedControl = submenu
-				lacAtHalfRow = false
-
-				anchorOffsetSub = 0
-				lacAtHalfRowSub = nil
-				lastAddedControlSub = nil
-				for sIndex=1,#widgetData.controls do
-					subWidgetData = widgetData.controls[sIndex]
-					subWidgetType = subWidgetData.type
-					subWidget = LAMCreateControl[subWidgetType](submenu, subWidgetData)
-					isHalf = subWidgetData.width == "half"
-					if lastAddedControlSub then
-						if lacAtHalfRowSub and isHalf then
-							subWidget:SetAnchor(TOPLEFT, lastAddedControlSub, TOPRIGHT, 5, 0)
-							lacAtHalfRowSub = false
-							anchorOffsetSub = zo_max(0, subWidget:GetHeight() - lastAddedControlSub:GetHeight())
-						else
-							subWidget:SetAnchor(TOPLEFT, lastAddedControlSub, BOTTOMLEFT, 0, 15 + anchorOffsetSub)
-							lacAtHalfRowSub = isHalf
-							anchorOffsetSub = 0
-							lastAddedControlSub = subWidget
-						end
-					else
-						subWidget:SetAnchor(TOPLEFT)
-						lacAtHalfRowSub = isHalf
-						lastAddedControlSub = subWidget
-					end
-				end
-			else
-				widget = LAMCreateControl[widgetType](panel, widgetData)
-				isHalf = widgetData.width == "half"
-				if lastAddedControl then
-					if lacAtHalfRow and isHalf then
-						widget:SetAnchor(TOPLEFT, lastAddedControl, TOPRIGHT, 10, 0)
-						anchorOffset = zo_max(0, widget:GetHeight() - lastAddedControl:GetHeight())
-						lacAtHalfRow = false
-					else
-						widget:SetAnchor(TOPLEFT, lastAddedControl, BOTTOMLEFT, 0, 15 + anchorOffset)
-						lacAtHalfRow = isHalf
-						anchorOffset = 0
-						lastAddedControl = widget
-					end
-				else
-					widget:SetAnchor(TOPLEFT)
-					lacAtHalfRow = isHalf
-					lastAddedControl = widget
-				end
-			end
-		end
+local function CreateOptionsControlsRecursively(parent, optionsTable, maxDepth)
+	if not optionsTable or maxDepth < 0 then
+		return
 	end
 
-	optionsCreated[addonID] = true
-	cm:FireCallbacks("LAM-PanelControlsCreated", panel)
+	local lastAddedControl, lacAtHalfRow
+	local anchorOffset = 0
+
+	for optionIndex = 1, #optionsTable do
+		local widgetData = optionsTable[optionIndex]
+		local widgetType = widgetData.type
+		local widget = lamcc[widgetType](parent, widgetData)
+		local isHalf = false
+
+		if widgetType == "submenu" then
+			CreateOptionsControlsRecursively(widget, widgetData.controls, maxDepth - 1)
+		else
+			isHalf = (widgetData.width == "half")
+		end
+
+		if lastAddedControl then
+			if lacAtHalfRow and isHalf then
+				widget:SetAnchor(TOPLEFT, lastAddedControl, TOPRIGHT, 10, 0)
+				anchorOffset = zo_max(0, widget:GetHeight() - lastAddedControl:GetHeight())
+				lacAtHalfRow = false
+				-- lastAddedControl intentionally LEFT unchanged
+			else
+				widget:SetAnchor(TOPLEFT, lastAddedControl, BOTTOMLEFT, 0, 15 + anchorOffset)
+				lacAtHalfRow = isHalf
+				anchorOffset = 0
+				lastAddedControl = widget
+			end
+		else
+			widget:SetAnchor(TOPLEFT)
+			lacAtHalfRow = isHalf
+			lastAddedControl = widget
+		end
+	end
 end
 
 
@@ -262,8 +226,15 @@ local function ToggleAddonPanels(panel)	--called in OnShow of newly shown panel
 	-- refresh visible rows to reflect panel IsHidden status
 	ZO_ScrollList_RefreshVisible(lam.addonList)
 
-	if not optionsCreated[panel:GetName()] then	--if this is the first time opening this panel, create these options
-		CreateOptionsControls(panel)
+	local addonID = panel:GetName()
+	if not optionsCreated[addonID] then
+		--if this is the first time opening this panel, create these options
+		local optionsTable = addonToOptionsMap[addonID]
+
+		CreateOptionsControlsRecursively(panel, optionsTable, 1)
+
+		optionsCreated[addonID] = true
+		cm:FireCallbacks("LAM-PanelControlsCreated", panel)
 	end
 
 	cm:FireCallbacks("LAM-RefreshPanel", panel)
