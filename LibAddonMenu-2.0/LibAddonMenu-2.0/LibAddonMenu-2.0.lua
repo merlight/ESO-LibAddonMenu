@@ -12,6 +12,7 @@ if not lam then return end	--the same or newer version of this lib is already lo
 --UPVALUES--
 local wm = WINDOW_MANAGER
 local cm = CALLBACK_MANAGER
+local tconcat = table.concat
 local tinsert = table.insert
 
 local addonsForList = {}
@@ -23,6 +24,41 @@ local widgets = lam.widgets
 local ADDON_DATA_TYPE = 1
 local RESELECTING_DURING_REBUILD = true
 local USER_REQUESTED_OPEN = true
+
+
+--INTERNAL FUNCTION
+--splits the text contained in `searchEdit` into whitespace-separated
+--terms (words if you will, but they may actually be search patterns)
+--	if there is at least one term, returns a filter function
+--	otherwise returns nil
+--filter function takes a `data` table argument, and returns true
+--	iff `data.filterText` (which must be a string) matches every term
+local function GetSearchFilterFunc(searchEdit)
+	local searchText = searchEdit:GetText()
+	local strfind = string.find
+
+	if not strfind(searchText, "%S") then -- nothing but whitespace
+		return nil
+	end
+
+	local searchTerms = {}
+	local numTerms = 0
+
+	for t in searchText:lower():gmatch("%S+") do -- split "words"
+		numTerms = numTerms + 1
+		searchTerms[numTerms] = t
+	end
+
+	return function(data)
+		local filterText = data.filterText
+		for i = 1, numTerms do
+			if not strfind(filterText, searchTerms[i]) then
+				return false
+			end
+		end
+		return true
+	end
+end
 
 
 --INTERNAL FUNCTION
@@ -250,9 +286,15 @@ function lam:RegisterAddonPanel(addonID, panelData)
 		return str:gsub("|[Cc]%x%x%x%x%x%x", ""):gsub("|[Rr]", "")
 	end
 
+	local filterParts = {panelData.name, nil, nil}
+	-- append keywords and author separately, the may be nil
+	filterParts[#filterParts + 1] = panelData.keywords
+	filterParts[#filterParts + 1] = panelData.author
+
 	local addonData = {
 		panel = panel,
 		name = stripMarkup(panelData.name),
+		filterText = stripMarkup(tconcat(filterParts, "\t")):lower(),
 	}
 
 	tinsert(addonsForList, addonData)
@@ -315,9 +357,10 @@ local function CreateAddonSettingsMenuEntry()
 		title:SetText(panelData.name)
 
 		if not addonListSorted and #addonsForList > 0 then
+			local searchEdit = LAMAddonSettingsWindow:GetNamedChild("SearchEdit")
 			--we're about to show our list for the first time - let's sort it
 			table.sort(addonsForList, function(a, b) return a.name < b.name end)
-			PopulateAddonList(lam.addonList, nil)
+			PopulateAddonList(lam.addonList, GetSearchFilterFunc(searchEdit))
 			addonListSorted = true
 		end
 	end
@@ -456,6 +499,40 @@ local function CreateAddonSettingsWindow()
 	addonList:SetDimensions(285, 675)
 
 	lam.addonList = addonList -- for easy access from elsewhere
+
+	-- create search filter box
+
+	local searchIcon = wm:CreateControl("$(parent)SearchIcon", tlw, CT_TEXTURE)
+	searchIcon:SetTexture("EsoUI/Art/Miscellaneous/search_icon.dds")
+	searchIcon:SetDimensions(32, 32)
+	searchIcon:SetAnchor(TOPLEFT, addonList, BOTTOMLEFT, -7, 0)
+	searchIcon:SetDrawLayer(DL_CONTROLS)
+	searchIcon:SetMouseEnabled(true)
+
+	local searchEdit = wm:CreateControlFromVirtual("$(parent)SearchEdit", tlw, "ZO_DefaultEdit")
+	if wm.ApplyTemplateToControl then -- available since API version 100011
+		wm:ApplyTemplateToControl(searchEdit, "ZO_EditDefaultText")
+		ZO_EditDefaultText_Initialize(searchEdit, GetString(SI_ITEM_FILTER_BY_TEXT))
+	end
+	searchEdit:SetAnchor(TOPLEFT, addonList, BOTTOMLEFT, 30, 5)
+	searchEdit:SetAnchor(TOPRIGHT, addonList, BOTTOMRIGHT, -20, 5)
+
+	local searchBg = wm:CreateControlFromVirtual("$(parent)Background", searchEdit, "ZO_EditBackdrop")
+	searchBg:SetAnchor(TOPLEFT, searchEdit, TOPLEFT, -4, -2)
+	searchBg:SetAnchor(BOTTOMRIGHT, searchEdit, BOTTOMRIGHT, 4, 0)
+
+	searchEdit:SetHandler("OnEscape", function(self)
+		self:SetText("")
+		self:LoseFocus()
+	end)
+
+	searchEdit:SetHandler("OnTextChanged", function(self)
+		if wm.ApplyTemplateToControl then -- available since API version 100011
+			ZO_EditDefaultText_OnTextChanged(self)
+		end
+		PopulateAddonList(addonList, GetSearchFilterFunc(self))
+		PlaySound(SOUNDS.SPINNER_DOWN)
+	end)
 
 	-- create container for option panels
 
