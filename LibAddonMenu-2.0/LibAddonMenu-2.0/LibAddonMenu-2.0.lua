@@ -171,6 +171,34 @@ end
 
 
 --INTERNAL FUNCTION
+--creates a simpe row control to hold two half-width widgets;
+--the control will kidnap the twins and auto-resize itself, so that
+--other controls anchored to its bottom are always below both twins,
+--even if they're not the same height
+local function CreateTwinOptionsRow(parent, leftWidget, rightWidget)
+	local rowParent = parent.scroll or parent
+	local panel = parent.panel or parent
+	local index = (panel.twinrowCounter or 0) + 1
+	panel.twinrowCounter = index
+	local row = wm:CreateControl("$(parent)TwinRow" .. index, rowParent, CT_CONTROL)
+	row:SetWidth(rowParent:GetWidth())
+	row:SetResizeToFitDescendents(true) -- mainly for height
+	-- copy anchor from the left widget to the row,
+	-- and then anchor the left widget to the row
+	row:SetAnchor(select(2, leftWidget:GetAnchor(0)))
+	leftWidget:ClearAnchors()
+	leftWidget:SetAnchor(TOPLEFT, row, TOPLEFT)
+	-- "kidnap the twins"
+	leftWidget:SetParent(row)
+	rightWidget:SetParent(row)
+	-- not sure these are required
+	row.data = {type = "twinrow"} -- hope this cheat doesn't break anything
+	row.panel = panel
+	return row
+end
+
+
+--INTERNAL FUNCTION
 --creates controls when options panel is first shown
 --controls anchoring of these controls in the panel
 local function CreateOptionsControlsRecursively(parent, optionsTable, maxDepth)
@@ -179,7 +207,6 @@ local function CreateOptionsControlsRecursively(parent, optionsTable, maxDepth)
 	end
 
 	local lastAddedControl, lacAtHalfRow
-	local anchorOffset = 0
 
 	for optionIndex = 1, #optionsTable do
 		local widgetData = optionsTable[optionIndex]
@@ -196,13 +223,11 @@ local function CreateOptionsControlsRecursively(parent, optionsTable, maxDepth)
 		if lastAddedControl then
 			if lacAtHalfRow and isHalf then
 				widget:SetAnchor(TOPLEFT, lastAddedControl, TOPRIGHT, 10, 0)
-				anchorOffset = zo_max(0, widget:GetHeight() - lastAddedControl:GetHeight())
 				lacAtHalfRow = false
-				-- lastAddedControl intentionally LEFT unchanged
+				lastAddedControl = CreateTwinOptionsRow(parent, lastAddedControl, widget)
 			else
-				widget:SetAnchor(TOPLEFT, lastAddedControl, BOTTOMLEFT, 0, 15 + anchorOffset)
+				widget:SetAnchor(TOPLEFT, lastAddedControl, BOTTOMLEFT, 0, 15)
 				lacAtHalfRow = isHalf
-				anchorOffset = 0
 				lastAddedControl = widget
 			end
 		else
